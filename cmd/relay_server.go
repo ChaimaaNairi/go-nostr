@@ -76,7 +76,7 @@ func (s *NostrRelayServer) Start() {
 
 	// Start the HTTP server.
 	go func() {
-		log.Println("Starting Nostr Relay Server on port 8080...")
+		log.Println("Starting Nostr Relay Server on port 8000...")
 		if err := http.ListenAndServe(":8000", nil); err != nil {
 			log.Fatal("Error starting Nostr Relay Server:", err)
 		}
