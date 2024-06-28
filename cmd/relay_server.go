@@ -2,9 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
-	"sync"
 
 	"github.com/gorilla/websocket"
 )
@@ -18,71 +18,48 @@ type Message struct {
 }
 
 var (
-	clients   = make(map[*websocket.Conn]bool)
-	broadcast = make(chan Message)
-	upgrader  = websocket.Upgrader{}
-	messages  []Message
-	mu        sync.Mutex
+	upgrader = websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin: func(r *http.Request) bool {
+			return true // Allow any origin for WebSocket connections
+		},
+	}
 )
 
 func main() {
-	http.HandleFunc("/ws", handleConnections)
-	http.HandleFunc("/events", handleEvents)
+	fmt.Println("Starting relay server...")
 
-	go handleMessages()
-
-	log.Println("Relay server started on :8000")
-	err := http.ListenAndServe(":8000", nil)
-	if err != nil {
-		log.Fatal("ListenAndServe: ", err)
-	}
+	http.HandleFunc("/ws", handleWebSocket)
+	log.Fatal(http.ListenAndServe(":8000", nil))
 }
 
-func handleConnections(w http.ResponseWriter, r *http.Request) {
-	ws, err := upgrader.Upgrade(w, r, nil)
+func handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Fatal(err)
+		log.Println("Error upgrading to WebSocket:", err)
+		return
 	}
-	defer ws.Close()
-
-	mu.Lock()
-	clients[ws] = true
-	mu.Unlock()
+	defer conn.Close()
 
 	for {
-		var msg Message
-		err := ws.ReadJSON(&msg)
+		_, msg, err := conn.ReadMessage()
 		if err != nil {
-			log.Printf("error: %v", err)
-			mu.Lock()
-			delete(clients, ws)
-			mu.Unlock()
+			log.Println("Error reading message:", err)
 			break
 		}
-		broadcast <- msg
-	}
-}
 
-func handleMessages() {
-	for {
-		msg := <-broadcast
-		mu.Lock()
-		messages = append(messages, msg)
-		for client := range clients {
-			err := client.WriteJSON(msg)
-			if err != nil {
-				log.Printf("error: %v", err)
-				client.Close()
-				delete(clients, client)
-			}
+		var message Message
+		if err := json.Unmarshal(msg, &message); err != nil {
+			log.Println("Error unmarshalling message:", err)
+			continue
 		}
-		mu.Unlock()
-	}
-}
 
-func handleEvents(w http.ResponseWriter, r *http.Request) {
-	mu.Lock()
-	defer mu.Unlock()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(messages)
+		// Implement message routing logic here
+		// Example: Forward message to recipient
+		log.Printf("Received message: %s from %s to %s\n", message.Content, message.Sender, message.Recipient)
+
+		// In a real application, you would implement logic to forward the message to the intended recipient
+		// For this example, simply log the message received
+	}
 }
