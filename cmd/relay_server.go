@@ -1,98 +1,88 @@
 package main
 
 import (
-    "log"
-    "net/http"
-    "os"
-    "os/signal"
-    "github.com/gorilla/websocket"
+	"encoding/json"
+	"log"
+	"net/http"
+	"sync"
+
+	"github.com/gorilla/websocket"
 )
 
-// Define a struct to represent the Nostr relay server.
-type NostrRelayServer struct {
-	clients       map[string]*websocket.Conn
-	addClient     chan *websocket.Conn
-	removeClient  chan *websocket.Conn
-	broadcast     chan []byte
-	upgrader      websocket.Upgrader
+type Message struct {
+	ID        string `json:"id"`
+	Sender    string `json:"sender"`
+	Recipient string `json:"recipient"`
+	Content   string `json:"content"`
+	Timestamp string `json:"timestamp"`
 }
 
-// Initialize the Nostr relay server.
-func NewNostrRelayServer() *NostrRelayServer {
-	return &NostrRelayServer{
-		clients:       make(map[string]*websocket.Conn),
-		addClient:     make(chan *websocket.Conn),
-		removeClient:  make(chan *websocket.Conn),
-		broadcast:     make(chan []byte),
-		upgrader:      websocket.Upgrader{},
+var (
+	clients   = make(map[*websocket.Conn]bool)
+	broadcast = make(chan Message)
+	upgrader  = websocket.Upgrader{}
+	messages  []Message
+	mu        sync.Mutex
+)
+
+func main() {
+	http.HandleFunc("/ws", handleConnections)
+	http.HandleFunc("/events", handleEvents)
+
+	go handleMessages()
+
+	log.Println("Relay server started on :8000")
+	err := http.ListenAndServe(":8000", nil)
+	if err != nil {
+		log.Fatal("ListenAndServe: ", err)
 	}
 }
 
-// Start the Nostr relay server.
-func (s *NostrRelayServer) Start() {
-	// Start a goroutine to handle incoming client connections.
-	go func() {
-		for {
-			select {
-			case conn := <-s.addClient:
-				s.clients[conn.RemoteAddr().String()] = conn
-			case conn := <-s.removeClient:
-				delete(s.clients, conn.RemoteAddr().String())
-				conn.Close()
-			case msg := <-s.broadcast:
-				// Broadcast the received message to all connected clients.
-				for _, conn := range s.clients {
-					conn.WriteMessage(websocket.TextMessage, msg)
-				}
-			}
-		}
-	}()
+func handleConnections(w http.ResponseWriter, r *http.Request) {
+	ws, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer ws.Close()
 
-	// Start a goroutine to handle HTTP requests to upgrade to WebSocket connections.
-	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := s.upgrader.Upgrade(w, r, nil)
+	mu.Lock()
+	clients[ws] = true
+	mu.Unlock()
+
+	for {
+		var msg Message
+		err := ws.ReadJSON(&msg)
 		if err != nil {
-			log.Println("Error upgrading to WebSocket:", err)
-			return
+			log.Printf("error: %v", err)
+			mu.Lock()
+			delete(clients, ws)
+			mu.Unlock()
+			break
 		}
-		defer conn.Close()
-
-		// Add the client to the relay server.
-		s.addClient <- conn
-		defer func() {
-			s.removeClient <- conn
-		}()
-
-		// Listen for messages from the client.
-		for {
-			_, msg, err := conn.ReadMessage()
-			if err != nil {
-				break
-			}
-			// Broadcast the received message to all connected clients.
-			s.broadcast <- msg
-		}
-	})
-
-	// Start the HTTP server.
-	go func() {
-		log.Println("Starting Nostr Relay Server on port 8000...")
-		if err := http.ListenAndServe(":8000", nil); err != nil {
-			log.Fatal("Error starting Nostr Relay Server:", err)
-		}
-	}()
-
-	// Wait for interrupt signal (Ctrl+C) to gracefully shutdown the server.
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt)
-	<-quit
-	log.Println("Shutting down Nostr Relay Server...")
+		broadcast <- msg
+	}
 }
 
-func main() {
-	// Create a new instance of the Nostr relay server.
-	server := NewNostrRelayServer()
+func handleMessages() {
+	for {
+		msg := <-broadcast
+		mu.Lock()
+		messages = append(messages, msg)
+		for client := range clients {
+			err := client.WriteJSON(msg)
+			if err != nil {
+				log.Printf("error: %v", err)
+				client.Close()
+				delete(clients, client)
+			}
+		}
+		mu.Unlock()
+	}
+}
 
-	// Start the Nostr relay server.
-	server.Start()
+func handleEvents(w http.ResponseWriter, r *http.Request) {
+	mu.Lock()
+	defer mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(messages)
 }
