@@ -1,3 +1,5 @@
+// relay_server.go
+
 package main
 
 import (
@@ -9,6 +11,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// Message represents the structure of the message sent over WebSocket
 type Message struct {
 	ID        string `json:"id"`
 	Sender    string `json:"sender"`
@@ -55,11 +58,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Implement message routing logic here
-		// Example: Forward message to recipient
+		// Implement message routing logic here (forwarding messages, etc.)
 		log.Printf("Received message: %s from %s to %s\n", message.Content, message.Sender, message.Recipient)
-
-		// In a real application, you would implement logic to forward the message to the intended recipient
-		// For this example, simply log the message received
 	}
 }

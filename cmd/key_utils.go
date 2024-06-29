@@ -1,3 +1,5 @@
+// key_utils.go
+
 package main
 
 import (
@@ -7,6 +9,7 @@ import (
 	"github.com/nbd-wtf/go-nostr"
 )
 
+// loadKeys loads keys from a JSON file
 func loadKeys(filePath string) (string, string, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -25,6 +28,7 @@ func loadKeys(filePath string) (string, string, error) {
 	return keys.PublicKey, keys.PrivateKey, nil
 }
 
+// saveKeys saves keys to a JSON file
 func saveKeys(publicKey, privateKey, filePath string) error {
 	keyData := struct {
 		PrivateKey string `json:"privateKey"`
@@ -46,6 +50,7 @@ func saveKeys(publicKey, privateKey, filePath string) error {
 	return nil
 }
 
+// generateNewKeys generates new public and private keys
 func generateNewKeys() (string, string) {
 	privateKey := nostr.GeneratePrivateKey()
 	publicKey, _ := nostr.GetPublicKey(privateKey)
