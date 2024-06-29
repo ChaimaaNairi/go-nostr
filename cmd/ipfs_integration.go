@@ -10,7 +10,6 @@ import (
 )
 
 var (
-	// Replace with your actual IPFS daemon address
 	ipfsAddress = "/ip4/127.0.0.1/tcp/5001"
 )
 
